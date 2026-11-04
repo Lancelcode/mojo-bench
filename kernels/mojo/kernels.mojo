@@ -107,7 +107,8 @@ def mat_checksum(n: Int, c: FPtr) -> String:
     var acc: Float64 = 0.0
     for i in range(n):
         for j in range(n):
-            acc += c.unsafe_load(i * n + j) * Float64((i + 2 * j) % 7)
+            var v = c.unsafe_load(i * n + j)
+            acc += v * Float64((3 * i + 5 * j) % 13 + 1) + v * v
     return String(Int(acc))
 
 

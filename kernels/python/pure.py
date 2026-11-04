@@ -51,8 +51,10 @@ def matmul_tiled(state, bs=32):
 
 
 def mat_checksum(c):
+    """Weighted sum plus sum of squares: exact in float64 and sensitive to any wrong element."""
     n = len(c)
-    return int(sum(c[i][j] * ((i + 2 * j) % 7) for i in range(n) for j in range(n)))
+    return int(sum(v * ((3 * i + 5 * j) % 13 + 1) + v * v
+               for i in range(n) for j, v in enumerate(c[i])))
 
 
 # ---------------------------------------------------------------- mandelbrot

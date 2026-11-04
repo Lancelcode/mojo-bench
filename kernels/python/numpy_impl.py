@@ -23,7 +23,7 @@ def mat_inputs(n):
 
 def mat_checksum(c):
     i, j = np.indices(c.shape)
-    return int((c * ((i + 2 * j) % 7)).sum())
+    return int((c * ((3 * i + 5 * j) % 13 + 1) + c * c).sum())
 
 
 # ---------------------------------------------------------------- mandelbrot

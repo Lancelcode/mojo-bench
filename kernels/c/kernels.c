@@ -99,8 +99,10 @@ static void mat_checksum(State *s, char *out) {
     long n = s->n;
     double acc = 0.0;
     for (long i = 0; i < n; i++)
-        for (long j = 0; j < n; j++)
-            acc += s->c[i * n + j] * (double)((i + 2 * j) % 7);
+        for (long j = 0; j < n; j++) {
+            double v = s->c[i * n + j];
+            acc += v * (double)((3 * i + 5 * j) % 13 + 1) + v * v;
+        }
     sprintf(out, "%lld", (long long)llround(acc));
 }
 
