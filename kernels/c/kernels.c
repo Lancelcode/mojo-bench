@@ -340,6 +340,92 @@ static void hash_table(State *s) {
     s->vsum = vsum;
 }
 
+/* ------------------------------------------------------------- word count */
+
+#define VOCAB 5000
+#define WC_M 1000003
+#define WC_CAP 65536 /* power of two, far above the ~5,000 distinct words */
+
+typedef struct {
+    uint64_t hash;
+    long start, len, count;
+} WcEntry;
+
+static char *wc_text;
+static long wc_len;
+static WcEntry *wc_table;
+
+static void wc_setup(State *s) {
+    /* Build the vocabulary, then the text, exactly as kernels/python/pure.py does. */
+    char words[VOCAB][8];
+    int lens[VOCAB];
+    for (long k = 0; k < VOCAB; k++) {
+        long h = (k * 2654435761L) % WC_M, p = 1;
+        lens[k] = 2 + (int)(k % 6);
+        for (int j = 0; j < lens[k]; j++, p *= 26) words[k][j] = (char)('a' + (h / p) % 26);
+    }
+    wc_text = xmalloc((size_t)s->n * 9);
+    long pos = 0;
+    for (long i = 0; i < s->n; i++) {
+        long r = (i * 2654435761L) % WC_M;
+        long k = (r * r / WC_M) * VOCAB / WC_M;
+        memcpy(wc_text + pos, words[k], (size_t)lens[k]);
+        pos += lens[k];
+        wc_text[pos++] = (i % 12 == 11) ? '\n' : ' ';
+    }
+    wc_len = pos;
+    wc_table = xmalloc(sizeof(WcEntry) * WC_CAP);
+}
+
+/* Tokenise on spaces/newlines; FNV-1a hash; open addressing with full
+ * string comparison, so counts are exact. */
+static void word_count(State *s) {
+    (void)s;
+    const char *t = wc_text;
+    memset(wc_table, 0, sizeof(WcEntry) * WC_CAP);
+    long i = 0;
+    while (i < wc_len) {
+        while (i < wc_len && (t[i] == ' ' || t[i] == '\n')) i++;
+        if (i >= wc_len) break;
+        long start = i;
+        uint64_t h = 0xcbf29ce484222325ULL;
+        while (i < wc_len && t[i] != ' ' && t[i] != '\n') {
+            h = (h ^ (unsigned char)t[i]) * 0x100000001b3ULL;
+            i++;
+        }
+        long len = i - start;
+        long slot = (long)(h & (WC_CAP - 1));
+        for (;;) {
+            WcEntry *e = &wc_table[slot];
+            if (e->count == 0) {
+                e->hash = h;
+                e->start = start;
+                e->len = len;
+                e->count = 1;
+                break;
+            }
+            if (e->hash == h && e->len == len && memcmp(t + e->start, t + start, (size_t)len) == 0) {
+                e->count++;
+                break;
+            }
+            slot = (slot + 1) & (WC_CAP - 1);
+        }
+    }
+}
+
+static void wc_checksum(char *out) {
+    long long total = 0, distinct = 0, mx = 0, sumsq = 0;
+    for (long i = 0; i < WC_CAP; i++) {
+        long long c = wc_table[i].count;
+        if (!c) continue;
+        total += c;
+        distinct++;
+        if (c > mx) mx = c;
+        sumsq += c * c;
+    }
+    sprintf(out, "%lld/%lld/%lld/%lld", total, distinct, mx, sumsq);
+}
+
 /* ------------------------------------------------------------- driver */
 
 int main(int argc, char **argv) {
@@ -367,6 +453,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(k, "reduction")) { int_setup(&s); run = reduction; }
     else if (!strcmp(k, "prefix_sum")) { int_setup(&s); run = prefix_sum; }
     else if (!strcmp(k, "hash_table")) { hash_setup(&s); run = hash_table; }
+    else if (!strcmp(k, "word_count")) { wc_setup(&s); run = word_count; }
     else { printf("UNSUPPORTED %s\n", k); return 3; }
 
     for (int r = 0; r < warmup; r++) run(&s);
@@ -383,6 +470,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(k, "nbody")) nbody_checksum(&s, cs);
     else if (!strcmp(k, "reduction")) sprintf(cs, "%lld", (long long)s.isum);
     else if (!strcmp(k, "prefix_sum")) scan_checksum(&s, cs);
+    else if (!strcmp(k, "word_count")) wc_checksum(cs);
     else sprintf(cs, "%lld", (long long)(s.vsum * 7 + s.found));
 
     printf("RESULT %s %s ", k, cs);

@@ -37,4 +37,6 @@ def run(kernels):
         t0 = time.perf_counter()
         out = body(state)
         times.append(time.perf_counter() - t0)
-    print(f"RESULT {kernel} {checksum(out)!r} {','.join(f'{t:.9f}' for t in times)}")
+    cs = checksum(out)
+    cs = cs if isinstance(cs, str) else repr(cs)  # repr keeps every float digit
+    print(f"RESULT {kernel} {cs} {','.join(f'{t:.9f}' for t in times)}")

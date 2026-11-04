@@ -53,6 +53,7 @@ PROFILES = {
             "reduction": 10_000_000,
             "prefix_sum": 10_000_000,
             "hash_table": 2_000_000,
+            "word_count": 4_000_000,
         },
     },
     "quick": {
@@ -68,6 +69,7 @@ PROFILES = {
             "reduction": 100_003,
             "prefix_sum": 100_003,
             "hash_table": 10_007,
+            "word_count": 10_007,
         },
     },
 }
@@ -80,6 +82,7 @@ SIZE_NOTES = {
     "reduction": "n int64 values",
     "prefix_sum": "n int64 values",
     "hash_table": "n inserts + n lookups (50% hits)",
+    "word_count": "n words (~22 MB of text), ~4,700 distinct",
 }
 
 # Relative tolerance per kernel. Integer-valued checksums must match exactly,

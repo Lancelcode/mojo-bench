@@ -360,6 +360,88 @@ def hash_table(
     return (found, vsum)
 
 
+# ===------------------------------------------------------------- word count
+
+comptime VOCAB = 5000
+comptime WC_M = 1000003
+comptime WC_CAP = 65536  # power of two, far above the ~5,000 distinct words
+comptime SPACE = UInt8(32)
+comptime NEWLINE = UInt8(10)
+comptime BPtr = Pointer[UInt8, MutUntrackedOrigin]
+
+
+def wc_text(n: Int, text: BPtr) -> Int:
+    """Writes the generated text (identical to kernels/python/pure.py); returns its length."""
+    var words = unsafe_alloc[UInt8](VOCAB * 8)
+    var lens = ialloc(VOCAB)
+    for k in range(VOCAB):
+        var h = (k * 2654435761) % WC_M
+        var p = 1
+        var length = 2 + k % 6
+        lens.unsafe_store(k, Int64(length))
+        for j in range(length):
+            words.unsafe_store(k * 8 + j, UInt8(97 + (h // p) % 26))
+            p *= 26
+    var pos = 0
+    for i in range(n):
+        var r = (i * 2654435761) % WC_M
+        var k = (r * r // WC_M) * VOCAB // WC_M
+        var length = Int(lens.unsafe_load(k))
+        for j in range(length):
+            text.unsafe_store(pos + j, words.unsafe_load(k * 8 + j))
+        pos += length
+        text.unsafe_store(pos, NEWLINE if i % 12 == 11 else SPACE)
+        pos += 1
+    words.unsafe_free()
+    lens.unsafe_free()
+    return pos
+
+
+def word_count(
+    text: BPtr, length: Int, th: UPtr, tstart: IPtr, tlen: IPtr, tcount: IPtr
+):
+    """Tokenise on spaces/newlines; FNV-1a hash; open addressing with full
+    string comparison, so counts are exact."""
+    for s in range(WC_CAP):
+        tcount.unsafe_store(s, 0)
+    var i = 0
+    while i < length:
+        while i < length and (
+            text.unsafe_load(i) == SPACE or text.unsafe_load(i) == NEWLINE
+        ):
+            i += 1
+        if i >= length:
+            break
+        var start = i
+        var h = UInt64(0xCBF29CE484222325)
+        while i < length:
+            var c = text.unsafe_load(i)
+            if c == SPACE or c == NEWLINE:
+                break
+            h = (h ^ UInt64(c)) * UInt64(0x100000001B3)
+            i += 1
+        var wlen = i - start
+        var slot = Int(h & UInt64(WC_CAP - 1))
+        while True:
+            if tcount.unsafe_load(slot) == 0:
+                th.unsafe_store(slot, h)
+                tstart.unsafe_store(slot, Int64(start))
+                tlen.unsafe_store(slot, Int64(wlen))
+                tcount.unsafe_store(slot, 1)
+                break
+            if th.unsafe_load(slot) == h and Int(tlen.unsafe_load(slot)) == wlen:
+                var other = Int(tstart.unsafe_load(slot))
+                var same = True
+                for j in range(wlen):
+                    if text.unsafe_load(other + j) != text.unsafe_load(start + j):
+                        same = False
+                        break
+                if same:
+                    tcount.unsafe_store(slot, tcount.unsafe_load(slot) + 1)
+                    break
+            slot = (slot + 1) & (WC_CAP - 1)
+
+
 # ===------------------------------------------------------------- driver
 
 
@@ -495,5 +577,38 @@ def main() raises:
         for p in [keys, queries, seq, tk]:
             p.unsafe_free()
         tv.unsafe_free()
+    elif kernel == "word_count":
+        var text = unsafe_alloc[UInt8](n * 9)
+        var length = wc_text(n, text)
+        var th = unsafe_alloc[UInt64](WC_CAP)
+        var tstart = ialloc(WC_CAP)
+        var tlen = ialloc(WC_CAP)
+        var tcount = ialloc(WC_CAP)
+        for r in range(total_runs):
+            var t0 = now()
+            word_count(text, length, th, tstart, tlen, tcount)
+            if r >= warmup:
+                times.append(now() - t0)
+        var total: Int64 = 0
+        var distinct: Int64 = 0
+        var mx: Int64 = 0
+        var sumsq: Int64 = 0
+        for s in range(WC_CAP):
+            var c = tcount.unsafe_load(s)
+            if c == 0:
+                continue
+            total += c
+            distinct += 1
+            mx = max(mx, c)
+            sumsq += c * c
+        report(
+            kernel,
+            String(total, "/", distinct, "/", mx, "/", sumsq),
+            times,
+        )
+        text.unsafe_free()
+        th.unsafe_free()
+        for p in [tstart, tlen, tcount]:
+            p.unsafe_free()
     else:
         print("UNSUPPORTED", kernel)
