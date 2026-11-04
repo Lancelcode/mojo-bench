@@ -4,7 +4,9 @@ PYTHON ?= python3
 ifeq ($(origin CC),default)
 CC     := gcc
 endif
-CFLAGS ?= -O3 -march=native -std=c11 -Wall -Wextra -Wno-unknown-pragmas
+# GCC's default dialect (gnu17) is used on purpose: -std=c11 would switch off
+# floating-point contraction, i.e. FMA, which -march=native otherwise allows.
+CFLAGS ?= -O3 -march=native -Wall -Wextra -Wno-unknown-pragmas
 MOJO   ?= mojo
 BUILD  := build
 

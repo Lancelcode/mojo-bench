@@ -6,7 +6,8 @@
  * prints
  *   RESULT <kernel> <checksum> <t1,t2,...>
  *
- * Plain, idiomatic C99 compiled with gcc -O3 -march=native. No intrinsics:
+ * Plain, idiomatic C compiled with gcc -O3 -march=native (GCC's default
+ * gnu17 dialect, which allows FMA contraction). No intrinsics:
  * any SIMD here comes from the compiler's auto-vectoriser, which is what a
  * typical C programmer actually gets.
  */

@@ -82,10 +82,13 @@ SIZE_NOTES = {
     "hash_table": "n inserts + n lookups (50% hits)",
 }
 
-# Relative tolerance per kernel. Integer-valued checksums must match exactly;
-# n-body sums floating-point forces in different orders (SIMD lanes), so a
-# tiny relative difference is expected.
-TOLERANCE = {"nbody": 1e-9}
+# Relative tolerance per kernel. Integer-valued checksums must match exactly,
+# with one exception: compiled code may fuse x*x - y*y + c into an FMA, which
+# rounds differently from Python and can change the escape iteration of a
+# handful of boundary pixels in Mandelbrot (12 of 225.6 M iterations at
+# 2048 x 2048; none at the benchmark size). n-body sums floating-point forces
+# in different orders (SIMD lanes), so a tiny relative difference is expected.
+TOLERANCE = {"mandelbrot": 1e-6, "nbody": 1e-9}
 
 # Kernels with a parallel code path. The naive matmul is the deliberately
 # simple scalar baseline, and the hash table is a serial dependency chain.
@@ -194,7 +197,7 @@ def measure_startup(repeats=5):
     rows.append(("Mojo binary start (no-op kernel)", wall([str(BUILD / "kernels_mojo"), "noop"], repeats)))
     with tempfile.TemporaryDirectory() as tmp:
         rows.append(("gcc -O3 compile of kernels.c", wall(
-            ["gcc", "-O3", "-march=native", "-std=c11", "-o", f"{tmp}/k", str(ROOT / "kernels/c/kernels.c"), "-lm"], 3)))
+            ["gcc", "-O3", "-march=native", "-o", f"{tmp}/k", str(ROOT / "kernels/c/kernels.c"), "-lm"], 3)))
         rows.append(("mojo build of kernels.mojo", wall(
             ["mojo", "build", "-O3", str(ROOT / "kernels/mojo/kernels.mojo"), "-o", f"{tmp}/k"], 3)))
     rows.append(("mojo run kernels.mojo noop (JIT compile + run)", wall(
