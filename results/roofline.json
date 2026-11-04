@@ -1,0 +1,133 @@
+{
+  "roofs": {
+    "peak_gflops_1t": 83.27,
+    "triad_gbs_1t": 12.85,
+    "read_gbs_1t": 15.06,
+    "peak_gflops_4t": 330.69,
+    "triad_gbs_4t": 50.68,
+    "read_gbs_4t": 59.75
+  },
+  "ridge_flop_per_byte": 5.5345606694560665,
+  "points": [
+    {
+      "kernel": "matmul_tiled",
+      "impl": "c_omp",
+      "n": 1024,
+      "ai": 85.33333333333333,
+      "achieved_gops": 41.488444950239185,
+      "achieved_gbs": 0.4861927142606154,
+      "attainable_gops": 330.69,
+      "fraction_of_roof": 0.1254602345103849,
+      "bound": "compute",
+      "note": "2n\u00b3 flops; bytes = compulsory traffic for A, B and C (3\u00b78n\u00b2), an upper bound on intensity. With 64-wide tiles and no reuse beyond a tile it would fall to ~5 flop/byte, still at or past the ridge."
+    },
+    {
+      "kernel": "matmul_tiled",
+      "impl": "mojo_par",
+      "n": 1024,
+      "ai": 85.33333333333333,
+      "achieved_gops": 62.08967801211523,
+      "achieved_gbs": 0.7276134142044752,
+      "attainable_gops": 330.69,
+      "fraction_of_roof": 0.18775795461645417,
+      "bound": "compute",
+      "note": "2n\u00b3 flops; bytes = compulsory traffic for A, B and C (3\u00b78n\u00b2), an upper bound on intensity. With 64-wide tiles and no reuse beyond a tile it would fall to ~5 flop/byte, still at or past the ridge."
+    },
+    {
+      "kernel": "mandelbrot",
+      "impl": "c_omp",
+      "n": 2048,
+      "ai": Infinity,
+      "achieved_gops": 8.432211551175131,
+      "achieved_gbs": 0.0,
+      "attainable_gops": 330.69,
+      "fraction_of_roof": 0.02549884045836019,
+      "bound": "compute",
+      "note": "8 flops per useful iteration \u00d7 total iterations (from the checksum); no array traffic at all (only a running count), so intensity is effectively infinite."
+    },
+    {
+      "kernel": "mandelbrot",
+      "impl": "mojo_par",
+      "n": 2048,
+      "ai": Infinity,
+      "achieved_gops": 37.00187930037819,
+      "achieved_gbs": 0.0,
+      "attainable_gops": 330.69,
+      "fraction_of_roof": 0.11189294898659831,
+      "bound": "compute",
+      "note": "8 flops per useful iteration \u00d7 total iterations (from the checksum); no array traffic at all (only a running count), so intensity is effectively infinite."
+    },
+    {
+      "kernel": "nbody",
+      "impl": "c_omp",
+      "n": 4096,
+      "ai": 640.0,
+      "achieved_gops": 39.51460104238821,
+      "achieved_gbs": 0.06174156412873158,
+      "attainable_gops": 330.69,
+      "fraction_of_roof": 0.11949136968879678,
+      "bound": "compute",
+      "note": "~20 flops per pair (sqrt and divide counted as 1 each) \u00d7 5 steps \u00d7 n\u00b2; bytes \u2248 16 doubles per body per step (positions, masses, velocities read and written)."
+    },
+    {
+      "kernel": "nbody",
+      "impl": "mojo_par",
+      "n": 4096,
+      "ai": 640.0,
+      "achieved_gops": 43.245347698738996,
+      "achieved_gbs": 0.0675708557792797,
+      "attainable_gops": 330.69,
+      "fraction_of_roof": 0.13077307356962412,
+      "bound": "compute",
+      "note": "~20 flops per pair (sqrt and divide counted as 1 each) \u00d7 5 steps \u00d7 n\u00b2; bytes \u2248 16 doubles per body per step (positions, masses, velocities read and written)."
+    },
+    {
+      "kernel": "reduction",
+      "impl": "c_omp",
+      "n": 100000000,
+      "ai": 0.125,
+      "achieved_gops": 5.786935564729391,
+      "achieved_gbs": 46.29548451783513,
+      "attainable_gops": 7.46875,
+      "fraction_of_roof": 0.7748198245662783,
+      "bound": "memory",
+      "note": "1 integer add per 8-byte element read."
+    },
+    {
+      "kernel": "reduction",
+      "impl": "mojo_par",
+      "n": 100000000,
+      "ai": 0.125,
+      "achieved_gops": 6.356876576663485,
+      "achieved_gbs": 50.85501261330788,
+      "attainable_gops": 7.46875,
+      "fraction_of_roof": 0.8511299182143578,
+      "bound": "memory",
+      "note": "1 integer add per 8-byte element read."
+    },
+    {
+      "kernel": "prefix_sum",
+      "impl": "c_omp",
+      "n": 100000000,
+      "ai": 0.0625,
+      "achieved_gops": 3.156795142020583,
+      "achieved_gbs": 50.50872227232933,
+      "attainable_gops": 3.734375,
+      "fraction_of_roof": 0.845334263972039,
+      "bound": "memory",
+      "note": "Two-pass parallel scan: each element is read twice (8 + 8 bytes), written once (8) and pulled into cache before the write (write-allocate, 8): 2 adds per 32 bytes."
+    },
+    {
+      "kernel": "prefix_sum",
+      "impl": "mojo_par",
+      "n": 100000000,
+      "ai": 0.0625,
+      "achieved_gops": 2.6683243008757005,
+      "achieved_gbs": 42.69318881401121,
+      "attainable_gops": 3.734375,
+      "fraction_of_roof": 0.7145303567198529,
+      "bound": "memory",
+      "note": "Two-pass parallel scan: each element is read twice (8 + 8 bytes), written once (8) and pulled into cache before the write (write-allocate, 8): 2 adds per 32 bytes."
+    }
+  ]
+}
