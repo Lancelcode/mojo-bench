@@ -17,11 +17,15 @@ all: build
 deps:
 	$(PYTHON) -m pip install -r requirements.txt
 
-build: $(BUILD)/kernels_c $(BUILD)/kernels_mojo
+build: $(BUILD)/kernels_c $(BUILD)/kernels_c_omp $(BUILD)/kernels_mojo
 
 $(BUILD)/kernels_c: kernels/c/kernels.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -o $@ $< -lm
+
+$(BUILD)/kernels_c_omp: kernels/c/kernels.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -fopenmp -o $@ $< -lm
 
 $(BUILD)/kernels_mojo: kernels/mojo/kernels.mojo
 	@mkdir -p $(@D)

@@ -14,11 +14,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 SURFACE, INK, INK2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
-# Fixed categorical order: an implementation always gets the same colour.
+# Each implementation always gets the same colour; parallel variants are drawn last.
 SERIES = [
     ("numpy", "NumPy", "#2a78d6"),
     ("c", "C (1 thread)", "#eb6834"),
     ("mojo", "Mojo (1 thread)", "#1baf7a"),
+    ("c_omp", "C OpenMP (all cores)", "#6250d6"),
     ("mojo_par", "Mojo (all cores)", "#eda100"),
 ]
 
@@ -33,7 +34,7 @@ def main():
     kernels = list(dict.fromkeys(r["kernel"] for r in rows))
     speed = {(r["kernel"], r["impl"]): float(r["speedup_vs_python"]) for r in rows if r["speedup_vs_python"]}
 
-    bar_h, gap = 0.19, 0.02
+    bar_h, gap = 0.155, 0.015
     fig, ax = plt.subplots(figsize=(10, 7.5), dpi=160)
     fig.patch.set_facecolor(SURFACE)
     ax.set_facecolor(SURFACE)
@@ -41,7 +42,7 @@ def main():
         ys, xs = [], []
         for k, kernel in enumerate(kernels):
             if (kernel, impl) in speed:
-                ys.append(k + (s - 1.5) * (bar_h + gap))
+                ys.append(k + (s - (len(SERIES) - 1) / 2) * (bar_h + gap))
                 xs.append(speed[(kernel, impl)])
         # Bars grow from the Python baseline (1×) to the measured speed-up.
         ax.barh(ys, [x - 1 for x in xs], height=bar_h, color=colour, label=name, left=1)

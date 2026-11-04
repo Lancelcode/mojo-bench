@@ -10,6 +10,11 @@
  * gnu17 dialect, which allows FMA contraction). No intrinsics:
  * any SIMD here comes from the compiler's auto-vectoriser, which is what a
  * typical C programmer actually gets.
+ *
+ * The same source builds two binaries. Without -fopenmp the pragmas are
+ * ignored and everything is single-threaded (kernels_c). With -fopenmp
+ * (kernels_c_omp) the parallel kernels use `threads` OpenMP threads when
+ * threads > 0, mirroring the Mojo parallel path.
  */
 #define _POSIX_C_SOURCE 199309L
 #include <math.h>
@@ -18,6 +23,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 static double now(void) {
     struct timespec ts;
@@ -37,6 +45,7 @@ static void *xmalloc(size_t bytes) {
 /* Each kernel provides setup (untimed), run (timed) and checksum (untimed). */
 typedef struct {
     long n;
+    int threads;                     /* 0 = serial; > 0 = OpenMP threads */
     double *a, *b, *c;               /* matmul */
     double *x, *y, *z, *m;           /* n-body initial state */
     double *px, *py, *pz, *vx, *vy, *vz; /* n-body working state */
@@ -78,9 +87,14 @@ static void matmul_naive(State *s) {
 #define TILE 64
 static void matmul_tiled(State *s) {
     long n = s->n;
+    int T = s->threads;
+    (void)T; /* only used by OpenMP pragmas */
     const double *restrict a = s->a, *restrict b = s->b;
     double *restrict c = s->c;
-    memset(c, 0, sizeof(double) * n * n);
+#pragma omp parallel for schedule(static) num_threads(T > 0 ? T : 1) if (T > 0)
+    for (long i = 0; i < n; i++) memset(c + i * n, 0, sizeof(double) * n);
+    /* Each thread owns whole row blocks of C, so no synchronisation is needed. */
+#pragma omp parallel for schedule(static) num_threads(T > 0 ? T : 1) if (T > 0)
     for (long ii = 0; ii < n; ii += TILE)
         for (long kk = 0; kk < n; kk += TILE)
             for (long jj = 0; jj < n; jj += TILE) {
@@ -112,7 +126,11 @@ static void mat_checksum(State *s, char *out) {
 #define MAX_ITER 200
 static void mandelbrot(State *s) {
     long n = s->n;
+    int T = s->threads;
+    (void)T; /* only used by OpenMP pragmas */
     int64_t total = 0;
+    /* Rows interleaved across threads (chunk 1) to balance the costly rows. */
+#pragma omp parallel for schedule(static, 1) reduction(+ : total) num_threads(T > 0 ? T : 1) if (T > 0)
     for (long i = 0; i < n; i++) {
         double y0 = -1.25 + 2.5 * (double)i / (double)n;
         for (long j = 0; j < n; j++) {
@@ -161,7 +179,10 @@ static void nbody(State *s) {
     memset(vx, 0, sizeof(double) * n);
     memset(vy, 0, sizeof(double) * n);
     memset(vz, 0, sizeof(double) * n);
+    int T = s->threads;
+    (void)T; /* only used by OpenMP pragmas */
     for (int step = 0; step < STEPS; step++) {
+#pragma omp parallel for schedule(static) num_threads(T > 0 ? T : 1) if (T > 0)
         for (long i = 0; i < n; i++) {
             double xi = x[i], yi = y[i], zi = z[i];
             double ax = 0.0, ay = 0.0, az = 0.0;
@@ -206,14 +227,52 @@ static void int_setup(State *s) {
 
 static void reduction(State *s) {
     const int64_t *a = s->ia;
+    long n = s->n;
+    int T = s->threads;
+    (void)T; /* only used by OpenMP pragmas */
     int64_t acc = 0;
-    for (long i = 0; i < s->n; i++) acc += a[i];
+#pragma omp parallel for schedule(static) reduction(+ : acc) num_threads(T > 0 ? T : 1) if (T > 0)
+    for (long i = 0; i < n; i++) acc += a[i];
     s->isum = acc;
 }
 
 static void prefix_sum(State *s) {
     const int64_t *restrict a = s->ia;
     int64_t *restrict p = s->ib;
+#ifdef _OPENMP
+    if (s->threads > 0) {
+        /* Two-pass parallel scan, as in the Mojo version: sum each chunk,
+         * exclusive-scan the chunk sums, then scan each chunk from its offset. */
+        int T = s->threads;
+        (void)T; /* only used by OpenMP pragmas */
+        long n = s->n;
+        int64_t sums[1024];
+#pragma omp parallel num_threads(T)
+        {
+            int t = omp_get_thread_num();
+            long lo = n * t / T, hi = n * (t + 1) / T;
+            int64_t acc = 0;
+            for (long i = lo; i < hi; i++) acc += a[i];
+            sums[t] = acc;
+#pragma omp barrier
+#pragma omp single
+            {
+                int64_t run = 0;
+                for (int u = 0; u < T; u++) {
+                    int64_t v = sums[u];
+                    sums[u] = run;
+                    run += v;
+                }
+            }
+            acc = sums[t];
+            for (long i = lo; i < hi; i++) {
+                acc += a[i];
+                p[i] = acc;
+            }
+        }
+        return;
+    }
+#endif
     int64_t acc = 0;
     for (long i = 0; i < s->n; i++) {
         acc += a[i];
@@ -297,6 +356,8 @@ int main(int argc, char **argv) {
     memset(&s, 0, sizeof s);
     s.n = atol(argv[2]);
     int warmup = atoi(argv[3]), repeats = atoi(argv[4]);
+    s.threads = argc > 5 ? atoi(argv[5]) : 0;
+    if (s.threads > 1024) s.threads = 1024;
 
     void (*run)(State *) = NULL;
     if (!strcmp(k, "matmul_naive")) { mat_setup(&s); run = matmul_naive; }
