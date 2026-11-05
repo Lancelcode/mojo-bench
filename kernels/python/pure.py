@@ -1,4 +1,4 @@
-"""Pure-Python reference implementations (lists, loops, dict - no NumPy).
+"""Pure-Python reference implementations (lists, loops, dict, Counter - no NumPy).
 
 These are deliberately written the way a competent Python programmer would
 write them without reaching for extension modules. They are the baseline that
@@ -7,6 +7,7 @@ for correctness checks.
 """
 
 import math
+from collections import Counter
 from itertools import accumulate
 
 from harness import run
@@ -160,6 +161,34 @@ def hash_table(state):
     return found, vsum
 
 
+# ---------------------------------------------------------------- word count
+
+VOCAB, M = 5000, 1000003
+
+
+def make_word(k):
+    """Word for vocabulary id k: 2-7 lowercase letters from a scrambled k."""
+    h = (k * 2654435761) % M
+    return "".join(chr(97 + (h // 26**j) % 26) for j in range(2 + k % 6))
+
+
+def make_text(n):
+    """n words with a skewed (Zipf-like) id distribution; a newline after every 12th word."""
+    vocab = [make_word(k) for k in range(VOCAB)]
+    parts = []
+    for i in range(n):
+        r = (i * 2654435761) % M
+        parts.append(vocab[(r * r // M) * VOCAB // M])
+        parts.append("\n" if i % 12 == 11 else " ")
+    return "".join(parts)
+
+
+def counts_checksum(counts):
+    """total/distinct/max/sum-of-squares of the word counts."""
+    c = list(counts)
+    return f"{sum(c)}/{len(c)}/{max(c)}/{sum(x * x for x in c)}"
+
+
 KERNELS = {
     "matmul_naive": (mat_inputs, matmul_naive, mat_checksum),
     "matmul_tiled": (mat_inputs, matmul_tiled, mat_checksum),
@@ -168,6 +197,7 @@ KERNELS = {
     "reduction": (int_array, sum, lambda s: s),
     "prefix_sum": (int_array, lambda a: list(accumulate(a)), scan_checksum),
     "hash_table": (hash_inputs, hash_table, lambda r: r[1] * 7 + r[0]),
+    "word_count": (make_text, lambda text: Counter(text.split()), lambda c: counts_checksum(c.values())),
 }
 
 if __name__ == "__main__":
