@@ -10,6 +10,11 @@
  * gnu17 dialect, which allows FMA contraction). No intrinsics:
  * any SIMD here comes from the compiler's auto-vectoriser, which is what a
  * typical C programmer actually gets.
+ *
+ * The same source builds two binaries. Without -fopenmp the pragmas are
+ * ignored and everything is single-threaded (kernels_c). With -fopenmp
+ * (kernels_c_omp) the parallel kernels use `threads` OpenMP threads when
+ * threads > 0, mirroring the Mojo parallel path.
  */
 #define _POSIX_C_SOURCE 199309L
 #include <math.h>
@@ -18,6 +23,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 static double now(void) {
     struct timespec ts;
@@ -37,6 +45,7 @@ static void *xmalloc(size_t bytes) {
 /* Each kernel provides setup (untimed), run (timed) and checksum (untimed). */
 typedef struct {
     long n;
+    int threads;                     /* 0 = serial; > 0 = OpenMP threads */
     double *a, *b, *c;               /* matmul */
     double *x, *y, *z, *m;           /* n-body initial state */
     double *px, *py, *pz, *vx, *vy, *vz; /* n-body working state */
@@ -78,9 +87,14 @@ static void matmul_naive(State *s) {
 #define TILE 64
 static void matmul_tiled(State *s) {
     long n = s->n;
+    int T = s->threads;
+    (void)T; /* only used by OpenMP pragmas */
     const double *restrict a = s->a, *restrict b = s->b;
     double *restrict c = s->c;
-    memset(c, 0, sizeof(double) * n * n);
+#pragma omp parallel for schedule(static) num_threads(T > 0 ? T : 1) if (T > 0)
+    for (long i = 0; i < n; i++) memset(c + i * n, 0, sizeof(double) * n);
+    /* Each thread owns whole row blocks of C, so no synchronisation is needed. */
+#pragma omp parallel for schedule(static) num_threads(T > 0 ? T : 1) if (T > 0)
     for (long ii = 0; ii < n; ii += TILE)
         for (long kk = 0; kk < n; kk += TILE)
             for (long jj = 0; jj < n; jj += TILE) {
@@ -112,7 +126,11 @@ static void mat_checksum(State *s, char *out) {
 #define MAX_ITER 200
 static void mandelbrot(State *s) {
     long n = s->n;
+    int T = s->threads;
+    (void)T; /* only used by OpenMP pragmas */
     int64_t total = 0;
+    /* Rows interleaved across threads (chunk 1) to balance the costly rows. */
+#pragma omp parallel for schedule(static, 1) reduction(+ : total) num_threads(T > 0 ? T : 1) if (T > 0)
     for (long i = 0; i < n; i++) {
         double y0 = -1.25 + 2.5 * (double)i / (double)n;
         for (long j = 0; j < n; j++) {
@@ -161,7 +179,10 @@ static void nbody(State *s) {
     memset(vx, 0, sizeof(double) * n);
     memset(vy, 0, sizeof(double) * n);
     memset(vz, 0, sizeof(double) * n);
+    int T = s->threads;
+    (void)T; /* only used by OpenMP pragmas */
     for (int step = 0; step < STEPS; step++) {
+#pragma omp parallel for schedule(static) num_threads(T > 0 ? T : 1) if (T > 0)
         for (long i = 0; i < n; i++) {
             double xi = x[i], yi = y[i], zi = z[i];
             double ax = 0.0, ay = 0.0, az = 0.0;
@@ -206,14 +227,52 @@ static void int_setup(State *s) {
 
 static void reduction(State *s) {
     const int64_t *a = s->ia;
+    long n = s->n;
+    int T = s->threads;
+    (void)T; /* only used by OpenMP pragmas */
     int64_t acc = 0;
-    for (long i = 0; i < s->n; i++) acc += a[i];
+#pragma omp parallel for schedule(static) reduction(+ : acc) num_threads(T > 0 ? T : 1) if (T > 0)
+    for (long i = 0; i < n; i++) acc += a[i];
     s->isum = acc;
 }
 
 static void prefix_sum(State *s) {
     const int64_t *restrict a = s->ia;
     int64_t *restrict p = s->ib;
+#ifdef _OPENMP
+    if (s->threads > 0) {
+        /* Two-pass parallel scan, as in the Mojo version: sum each chunk,
+         * exclusive-scan the chunk sums, then scan each chunk from its offset. */
+        int T = s->threads;
+        (void)T; /* only used by OpenMP pragmas */
+        long n = s->n;
+        int64_t sums[1024];
+#pragma omp parallel num_threads(T)
+        {
+            int t = omp_get_thread_num();
+            long lo = n * t / T, hi = n * (t + 1) / T;
+            int64_t acc = 0;
+            for (long i = lo; i < hi; i++) acc += a[i];
+            sums[t] = acc;
+#pragma omp barrier
+#pragma omp single
+            {
+                int64_t run = 0;
+                for (int u = 0; u < T; u++) {
+                    int64_t v = sums[u];
+                    sums[u] = run;
+                    run += v;
+                }
+            }
+            acc = sums[t];
+            for (long i = lo; i < hi; i++) {
+                acc += a[i];
+                p[i] = acc;
+            }
+        }
+        return;
+    }
+#endif
     int64_t acc = 0;
     for (long i = 0; i < s->n; i++) {
         acc += a[i];
@@ -281,6 +340,92 @@ static void hash_table(State *s) {
     s->vsum = vsum;
 }
 
+/* ------------------------------------------------------------- word count */
+
+#define VOCAB 5000
+#define WC_M 1000003
+#define WC_CAP 65536 /* power of two, far above the ~5,000 distinct words */
+
+typedef struct {
+    uint64_t hash;
+    long start, len, count;
+} WcEntry;
+
+static char *wc_text;
+static long wc_len;
+static WcEntry *wc_table;
+
+static void wc_setup(State *s) {
+    /* Build the vocabulary, then the text, exactly as kernels/python/pure.py does. */
+    char words[VOCAB][8];
+    int lens[VOCAB];
+    for (long k = 0; k < VOCAB; k++) {
+        long h = (k * 2654435761L) % WC_M, p = 1;
+        lens[k] = 2 + (int)(k % 6);
+        for (int j = 0; j < lens[k]; j++, p *= 26) words[k][j] = (char)('a' + (h / p) % 26);
+    }
+    wc_text = xmalloc((size_t)s->n * 9);
+    long pos = 0;
+    for (long i = 0; i < s->n; i++) {
+        long r = (i * 2654435761L) % WC_M;
+        long k = (r * r / WC_M) * VOCAB / WC_M;
+        memcpy(wc_text + pos, words[k], (size_t)lens[k]);
+        pos += lens[k];
+        wc_text[pos++] = (i % 12 == 11) ? '\n' : ' ';
+    }
+    wc_len = pos;
+    wc_table = xmalloc(sizeof(WcEntry) * WC_CAP);
+}
+
+/* Tokenise on spaces/newlines; FNV-1a hash; open addressing with full
+ * string comparison, so counts are exact. */
+static void word_count(State *s) {
+    (void)s;
+    const char *t = wc_text;
+    memset(wc_table, 0, sizeof(WcEntry) * WC_CAP);
+    long i = 0;
+    while (i < wc_len) {
+        while (i < wc_len && (t[i] == ' ' || t[i] == '\n')) i++;
+        if (i >= wc_len) break;
+        long start = i;
+        uint64_t h = 0xcbf29ce484222325ULL;
+        while (i < wc_len && t[i] != ' ' && t[i] != '\n') {
+            h = (h ^ (unsigned char)t[i]) * 0x100000001b3ULL;
+            i++;
+        }
+        long len = i - start;
+        long slot = (long)(h & (WC_CAP - 1));
+        for (;;) {
+            WcEntry *e = &wc_table[slot];
+            if (e->count == 0) {
+                e->hash = h;
+                e->start = start;
+                e->len = len;
+                e->count = 1;
+                break;
+            }
+            if (e->hash == h && e->len == len && memcmp(t + e->start, t + start, (size_t)len) == 0) {
+                e->count++;
+                break;
+            }
+            slot = (slot + 1) & (WC_CAP - 1);
+        }
+    }
+}
+
+static void wc_checksum(char *out) {
+    long long total = 0, distinct = 0, mx = 0, sumsq = 0;
+    for (long i = 0; i < WC_CAP; i++) {
+        long long c = wc_table[i].count;
+        if (!c) continue;
+        total += c;
+        distinct++;
+        if (c > mx) mx = c;
+        sumsq += c * c;
+    }
+    sprintf(out, "%lld/%lld/%lld/%lld", total, distinct, mx, sumsq);
+}
+
 /* ------------------------------------------------------------- driver */
 
 int main(int argc, char **argv) {
@@ -297,6 +442,8 @@ int main(int argc, char **argv) {
     memset(&s, 0, sizeof s);
     s.n = atol(argv[2]);
     int warmup = atoi(argv[3]), repeats = atoi(argv[4]);
+    s.threads = argc > 5 ? atoi(argv[5]) : 0;
+    if (s.threads > 1024) s.threads = 1024;
 
     void (*run)(State *) = NULL;
     if (!strcmp(k, "matmul_naive")) { mat_setup(&s); run = matmul_naive; }
@@ -306,6 +453,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(k, "reduction")) { int_setup(&s); run = reduction; }
     else if (!strcmp(k, "prefix_sum")) { int_setup(&s); run = prefix_sum; }
     else if (!strcmp(k, "hash_table")) { hash_setup(&s); run = hash_table; }
+    else if (!strcmp(k, "word_count")) { wc_setup(&s); run = word_count; }
     else { printf("UNSUPPORTED %s\n", k); return 3; }
 
     for (int r = 0; r < warmup; r++) run(&s);
@@ -322,6 +470,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(k, "nbody")) nbody_checksum(&s, cs);
     else if (!strcmp(k, "reduction")) sprintf(cs, "%lld", (long long)s.isum);
     else if (!strcmp(k, "prefix_sum")) scan_checksum(&s, cs);
+    else if (!strcmp(k, "word_count")) wc_checksum(cs);
     else sprintf(cs, "%lld", (long long)(s.vsum * 7 + s.found));
 
     printf("RESULT %s %s ", k, cs);

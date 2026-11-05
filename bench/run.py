@@ -53,6 +53,7 @@ PROFILES = {
             "reduction": 10_000_000,
             "prefix_sum": 10_000_000,
             "hash_table": 2_000_000,
+            "word_count": 4_000_000,
         },
     },
     "quick": {
@@ -68,6 +69,7 @@ PROFILES = {
             "reduction": 100_003,
             "prefix_sum": 100_003,
             "hash_table": 10_007,
+            "word_count": 10_007,
         },
     },
 }
@@ -80,6 +82,7 @@ SIZE_NOTES = {
     "reduction": "n int64 values",
     "prefix_sum": "n int64 values",
     "hash_table": "n inserts + n lookups (50% hits)",
+    "word_count": "n words (~22 MB of text), ~4,700 distinct",
 }
 
 # Relative tolerance per kernel. Integer-valued checksums must match exactly,
@@ -93,7 +96,7 @@ TOLERANCE = {"mandelbrot": 1e-6, "nbody": 1e-9}
 # Kernels with a parallel code path. The naive matmul is the deliberately
 # simple scalar baseline, and the hash table is a serial dependency chain.
 PARALLEL_KERNELS = {"matmul_tiled", "mandelbrot", "nbody", "reduction", "prefix_sum"}
-PARALLEL_IMPLS = {"mojo_par"}
+PARALLEL_IMPLS = {"c_omp", "mojo_par"}
 
 SERIAL_ENV = {"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
 
@@ -102,6 +105,7 @@ IMPLS = {
     "python": ("Python", [PY, str(ROOT / "kernels/python/pure.py")], None, SERIAL_ENV),
     "numpy": ("NumPy", [PY, str(ROOT / "kernels/python/numpy_impl.py")], None, SERIAL_ENV),
     "c": ("C (1 thread)", [str(BUILD / "kernels_c")], None, SERIAL_ENV),
+    "c_omp": (f"C OpenMP ({NCPU} threads)", [str(BUILD / "kernels_c_omp")], NCPU, {}),
     "mojo": ("Mojo (1 thread)", [str(BUILD / "kernels_mojo")], 0, {}),
     "mojo_par": (f"Mojo ({NCPU} threads)", [str(BUILD / "kernels_mojo")], NCPU, {}),
 }
