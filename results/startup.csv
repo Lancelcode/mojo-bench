@@ -1,0 +1,8 @@
+what,median_s
+Python interpreter start (no-op kernel),0.01938906599980328
+Python + import numpy (no-op kernel),0.09281186499993055
+C binary start (no-op kernel),0.001303087999986019
+Mojo binary start (no-op kernel),0.008412399999997433
+gcc -O3 compile of kernels.c,0.30993600600004356
+mojo build of kernels.mojo,1.8834661359996971
+mojo run kernels.mojo noop (JIT compile + run),1.8829604360003032

@@ -1,0 +1,4 @@
+numpy>=2.0
+matplotlib>=3.8
+mojo==1.2.0
+max-core==26.7.0

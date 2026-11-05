@@ -1,0 +1,14 @@
+# build outputs
+build/
+__pycache__/
+*.pyc
+.venv/
+
+# raw scratch output from local runs (curated results live in results/)
+results/raw/
+
+# local tooling
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.mcp.json
