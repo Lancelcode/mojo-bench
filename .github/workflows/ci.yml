@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  correctness:
+    name: Build C and Mojo, quick correctness pass
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python, NumPy and Mojo toolchain
+        run: python -m pip install -r requirements.txt
+
+      - name: Toolchain versions
+        run: |
+          gcc --version | head -1
+          mojo --version
+          python -c "import numpy; print('numpy', numpy.__version__)"
+
+      - name: Build C and Mojo kernels
+        run: make build
+
+      - name: Quick correctness pass (tiny sizes, every implementation vs pure Python)
+        run: make quick
